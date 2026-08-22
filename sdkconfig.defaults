@@ -1,0 +1,38 @@
+# ESP32-WROOM-32U: Bluetooth half of the two-chip split. Classic Bluetooth
+# A2DP source only (no BLE, no Wi-Fi at all on this chip). 4MB flash, no
+# PSRAM - but with no Wi-Fi/mbedTLS running here, Bluedroid has this board's
+# entire usable heap to itself.
+#
+# CONFIG_BT_CLASSIC_ENABLED/CONFIG_BT_BLE_ENABLED below only configure the
+# Bluedroid HOST stack - they are a separate Kconfig namespace from the
+# underlying BT CONTROLLER's compiled mode (CONFIG_BTDM_CTRL_MODE_*). Carried
+# over from the single-chip project's hardware-confirmed fix: without this
+# set explicitly, the controller silently compiles BLE-only regardless of
+# the host-stack settings below, and bluetooth_service_start() fails with
+# "enable controller failed".
+CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY=y
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=n
+CONFIG_BT_CLASSIC_ENABLED=y
+CONFIG_BT_A2DP_ENABLE=y
+CONFIG_BT_BLE_ENABLED=n
+CONFIG_BT_SPP_ENABLED=n
+CONFIG_BT_HFP_ENABLE=n
+CONFIG_BT_BTC_TASK_STACK_SIZE=4096
+
+# Real hardware: 4MB flash, no PSRAM.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# Optimize for size, not speed - tight flash/IRAM budget on this board.
+CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+
+# Logging is intentionally verbose for bring-up.
+CONFIG_LOG_DEFAULT_LEVEL_DEBUG=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+CONFIG_FREERTOS_ENABLE_BACKWARD_COMPATIBILITY=y
+CONFIG_ESP_TIMER_TASK_STACK_SIZE=8192
