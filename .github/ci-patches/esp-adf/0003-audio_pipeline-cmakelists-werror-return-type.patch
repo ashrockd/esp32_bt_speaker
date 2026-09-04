@@ -1,0 +1,10 @@
+diff --git a/components/audio_pipeline/CMakeLists.txt b/components/audio_pipeline/CMakeLists.txt
+index da246fe5..78a93614 100644
+--- a/components/audio_pipeline/CMakeLists.txt
++++ b/components/audio_pipeline/CMakeLists.txt
+@@ -9,3 +9,5 @@ set(COMPONENT_SRCS "audio_element.c"
+ set(COMPONENT_REQUIRES audio_sal esp-adf-libs)
+ 
+ register_component()
++
++target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-error=return-type)

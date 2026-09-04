@@ -1,0 +1,98 @@
+name: Build firmware (esp32)
+
+# Sibling to esp32_wifi_streamer/.github/workflows/build.yml - same
+# mechanism (offload building from the dev machine's slow local hardware
+# onto GitHub's runners, reproducing exactly what a human running
+# esp32_bt_speaker/build.ps1 locally does), adapted for this project's
+# target chip (esp32, not esp32s3 - this is the classic ESP32-WROOM-32U half
+# of the two-chip split, 4MB flash, no PSRAM) and smaller dependency closure
+# (no Wi-Fi/esp_http_client/mbedTLS at all on this chip).
+#
+# READ FIRST if this is your first time looking at this workflow:
+# .github/ci-patches/README.md documents every local ESP-ADF/ESP-IDF patch
+# this workflow applies and exactly why each one is needed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Layout: esp32_bt_speaker and esp-adf must end up as TRUE SIBLING
+      # directories - see the wifi_streamer workflow's identical comment for
+      # the full reasoning (build.ps1/CMakeLists.txt both resolve ESP-ADF via
+      # a relative ..\esp-adf reference).
+      - name: Checkout esp32_bt_speaker
+        uses: actions/checkout@v4
+        with:
+          path: esp32_bt_speaker
+
+      # Pinned to the exact commit the dev machine's vendored esp-adf
+      # checkout is sitting on - same pin as esp32_wifi_streamer's workflow
+      # (same physical vendored tree, shared between both projects on the
+      # dev machine) - see ci-patches/README.md "Base versions".
+      #
+      # submodules: false, esp-adf-libs + esp-sr initialized explicitly below
+      # - same reasoning as the sibling workflow's identical step (esp-adf's
+      # own bundled esp-idf submodule is never actually used - see
+      # ci-patches/README.md).
+      - name: Checkout esp-adf (pinned base commit)
+        uses: actions/checkout@v4
+        with:
+          repository: espressif/esp-adf
+          ref: eac70fd266099f61211962b006f2fbc0586bc08a
+          path: esp-adf
+          submodules: false
+
+      # esp-sr: components/audio_stream/CMakeLists.txt (a transitive
+      # REQUIRES via main/CMakeLists.txt's own REQUIRES audio_stream)
+      # requires it unconditionally - same gotcha esp32_wifi_streamer's
+      # workflow hit and documents at length. esp-adf-libs: filter_resample.c
+      # (this project's only esp-adf-libs dependency - see ci-patches/
+      # README.md "Base versions") physically lives inside that submodule,
+      # even though no patch is needed for it here.
+      - name: Init esp-adf-libs and esp-sr submodules
+        working-directory: esp-adf
+        run: git submodule update --init --depth 1 -- components/esp-adf-libs components/esp-sr
+
+      # Same image/approach as the sibling workflow - see its own comment
+      # for the full "why Docker, why this image, why --entrypoint bash"
+      # reasoning; identical here since both projects share the same
+      # non-standard build topology (standalone IDF + a separate, locally-
+      # patched ESP-ADF tree one directory up).
+      - name: Pull espressif/idf:v5.5.5
+        run: docker pull espressif/idf:v5.5.5
+
+      - name: Build (apply patches, activate IDF+ADF, idf.py build)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/workspace \
+            --entrypoint bash \
+            espressif/idf:v5.5.5 \
+            /workspace/esp32_bt_speaker/.github/ci-scripts/docker-build.sh
+
+      # Artifact set mirrors what a local build.ps1 run produces under
+      # esp32_bt_speaker/build/ - same reasoning as the sibling workflow.
+      # partitions.csv here defines only nvs/phy_init/factory (no storage
+      # slot, no OTA slot - this chip has no Wi-Fi stream buffers to size a
+      # storage partition for), so there is no extra data partition to
+      # include beyond the app binary itself.
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: esp32_bt_speaker-firmware
+          path: |
+            esp32_bt_speaker/build/esp32_bt_speaker.bin
+            esp32_bt_speaker/build/esp32_bt_speaker.elf
+            esp32_bt_speaker/build/esp32_bt_speaker.map
+            esp32_bt_speaker/build/flasher_args.json
+            esp32_bt_speaker/build/bootloader/bootloader.bin
+            esp32_bt_speaker/build/partition_table/partition-table.bin
+            esp32_bt_speaker/sdkconfig
+          if-no-files-found: error
+          retention-days: 30

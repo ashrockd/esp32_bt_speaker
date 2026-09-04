@@ -36,3 +36,34 @@ CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 
 CONFIG_FREERTOS_ENABLE_BACKWARD_COMPATIBILITY=y
 CONFIG_ESP_TIMER_TASK_STACK_SIZE=8192
+
+# ESP-ADF audio_board selection. This was previously left unset, which meant
+# ADF's own Kconfig default (ESP32-LyraT v4.3) silently applied - and that is
+# NOT harmless, because the selected board decides the real I2S pins.
+#
+# 2026-08-31: i2s_stream_idf5.c's i2s_driver_startup() calls the selected
+# board's get_i2s_pins() and memcpy()s the result straight over
+# rx_std_cfg.gpio_cfg, unconditionally, right before
+# i2s_channel_init_std_mode(). So main.c's own
+# i2s_cfg.std_cfg.gpio_cfg.bclk/ws/din assignments (from app_config.h's
+# RADIO_I2S_*_GPIO = 26/25/27) were being discarded, and this chip was really
+# listening on LyraT v4.3's pins instead: bck 5, ws 25, din 35. Only ws
+# matched, by coincidence - so the I2S link from the streamer chip could
+# never have carried audio. Found by disassembling get_i2s_pins in the built
+# .elf, not by reading source; verify the same way after changing either
+# this line or app_config.h:
+#   xtensa-esp32-elf-objdump -d --disassemble=get_i2s_pins \
+#       build/esp32_bt_speaker.elf
+# and read the constants stored at struct offsets +4/+8/+16 (bck/ws/din).
+#
+# Pinned to LyraT v4.2, with that board's get_i2s_pins() repointed to
+# 26/25/27 (see esp-adf/components/audio_board/lyrat_v4_2/board_pins_config.c
+# and its LOCAL EDIT comment). v4.3 is deliberately left alone because
+# esp32_wifi_streamer_520kbram/-multistation still select it and are I2S
+# MASTERS needing GPIO27 as data_OUT, which cannot coexist with a slave
+# needing it as data_IN in one board definition - IDF reads dout == din as a
+# loopback request. ../esp32_bt_speaker_48khz (a 48kHz test-only variant;
+# SBC itself cannot carry 48kHz) shares this same v4.2 board, which is fine:
+# both are RX slaves wanting identical pins.
+CONFIG_ESP_LYRAT_V4_2_BOARD=y
+# CONFIG_ESP_LYRAT_V4_3_BOARD is not set

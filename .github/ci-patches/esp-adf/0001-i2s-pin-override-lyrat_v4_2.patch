@@ -1,0 +1,55 @@
+diff --git a/components/audio_board/lyrat_v4_2/board_pins_config.c b/components/audio_board/lyrat_v4_2/board_pins_config.c
+index 674dbd3d..1e707e64 100644
+--- a/components/audio_board/lyrat_v4_2/board_pins_config.c
++++ b/components/audio_board/lyrat_v4_2/board_pins_config.c
+@@ -48,15 +48,45 @@ esp_err_t get_i2c_pins(i2c_port_t port, i2c_config_t *i2c_config)
+     return ESP_OK;
+ }
+ 
++/* 2026-08-31, LOCAL EDIT - NOT upstream ESP-ADF, and NOT real LyraT v4.2
++ * hardware pins any more (those were mck 0, bck 5, ws 25, dout 26, din 35;
++ * kept in the comment below). Repointed at esp32_bt_speaker's actual I2S
++ * wiring - it is the I2S SLAVE end of the two-chip link, receiving audio
++ * from the Wi-Fi/streamer chip.
++ *
++ * Why here and not in the app: i2s_stream_idf5.c's i2s_driver_startup()
++ * calls get_i2s_pins() and memcpy()s the result straight over
++ * rx_std_cfg.gpio_cfg - UNCONDITIONALLY, immediately before
++ * i2s_channel_init_std_mode() - so whatever main.c puts in
++ * i2s_cfg.std_cfg.gpio_cfg is overwritten and discarded. ESP-ADF exposes no
++ * public API to override it. This function IS where the pins are decided.
++ *
++ * Why LyraT v4.2 specifically, and not v4.3 (this project's previous board):
++ * v4.3 is still selected by esp32_wifi_streamer_520kbram and
++ * ...-multistation, which are I2S MASTERS and need GPIO27 as data_OUT. A
++ * slave needs GPIO27 as data_IN. One board definition cannot serve both:
++ * IDF's i2s_std.c treats dout == din as a request for LOOPBACK mode
++ * (i2s_std.c, "Loopback if dout = din"), so setting both to 27 would quietly
++ * wire the pin back into itself instead of either role. Moving the slaves to
++ * their own board keeps the two roles independent. IDF gates strictly on
++ * handle->dir, so dout = -1 below is correct and ignored on this RX channel.
++ *
++ * Keep these in sync with the esp32_bt_speaker projects' own
++ * main/app_config.h RADIO_I2S_*_GPIO defines - deliberately duplicated;
++ * app_config.h is what humans read, this is what the hardware obeys.
++ *
++ * Upstream values, for anyone restoring this to stock LyraT v4.2:
++ *   mck 0, bck 5, ws 25, data_out 26, data_in 35
++ */
+ esp_err_t get_i2s_pins(int port, board_i2s_pin_t *i2s_config)
+ {
+     AUDIO_NULL_CHECK(TAG, i2s_config, return ESP_FAIL);
+     if (port == 0 || port == 1) {
+-        i2s_config->mck_io_num = GPIO_NUM_0;
+-        i2s_config->bck_io_num = GPIO_NUM_5;
+-        i2s_config->ws_io_num = GPIO_NUM_25;
+-        i2s_config->data_out_num = GPIO_NUM_26;
+-        i2s_config->data_in_num = GPIO_NUM_35;
++        i2s_config->mck_io_num = -1;              /* no MCLK wire         */
++        i2s_config->bck_io_num = GPIO_NUM_26;     /* RADIO_I2S_BCLK_GPIO  */
++        i2s_config->ws_io_num = GPIO_NUM_25;      /* RADIO_I2S_WS_GPIO    */
++        i2s_config->data_out_num = -1;            /* RX-only slave link   */
++        i2s_config->data_in_num = GPIO_NUM_27;    /* RADIO_I2S_DATA_GPIO  */
+     } else {
+         memset(i2s_config, -1, sizeof(board_i2s_pin_t));
+         ESP_LOGE(TAG, "i2s port %d is not supported", port);

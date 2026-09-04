@@ -1,0 +1,9 @@
+diff --git a/components/audio_board/idf_component.yml b/components/audio_board/idf_component.yml
+index 2814fd69..c093387c 100644
+--- a/components/audio_board/idf_component.yml
++++ b/components/audio_board/idf_component.yml
+@@ -1,2 +1 @@
+-dependencies:
+-  esp_lcd_ili9341: "^1"
+\ No newline at end of file
++dependencies: {}

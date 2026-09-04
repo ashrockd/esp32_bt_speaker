@@ -1,0 +1,90 @@
+diff --git a/components/bluetooth_service/bluetooth_service.c b/components/bluetooth_service/bluetooth_service.c
+index 594c04c5..f8476111 100644
+--- a/components/bluetooth_service/bluetooth_service.c
++++ b/components/bluetooth_service/bluetooth_service.c
+@@ -590,26 +590,45 @@ esp_err_t bluetooth_service_start(bluetooth_service_cfg_t *config)
+     AUDIO_MEM_CHECK(TAG, g_bt_service, return ESP_ERR_NO_MEM);
+     memcpy(&g_bt_service->user_callback, &config->user_callback, sizeof(bluetooth_service_user_cb_t));
+ 
++    /* This releases the BLE controller memory, so only ESP_BT_MODE_CLASSIC_BT
++     * (not ESP_BT_MODE_BTDM, which needs that memory) can ever be enabled
++     * below - and the controller must be both *initialized* and *enabled*
++     * with the exact same mode (esp_bt_controller_init()'s cfg.mode, driven
++     * by the CONFIG_BTDM_CTRL_MODE_* Kconfig choice, must match the mode
++     * passed to esp_bt_controller_enable() here). This project's
++     * sdkconfig.defaults sets CONFIG_BTDM_CTRL_MODE_BR_EDR_ONLY, so
++     * ESP_BT_MODE_CLASSIC_BT is the only mode consistent with both of
++     * those - was previously ESP_BT_MODE_BTDM, which failed
++     * esp_bt_controller_enable() unconditionally on this project's
++     * classic-BT-only (A2DP source) configuration. */
+     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
+ 
+     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
+     if (esp_bt_controller_init(&bt_cfg) != ESP_OK) {
+         AUDIO_ERROR(TAG, "initialize controller failed");
++        audio_free(g_bt_service);
++        g_bt_service = NULL;
+         return ESP_FAIL;
+     }
+ 
+-    if (esp_bt_controller_enable(ESP_BT_MODE_BTDM) != ESP_OK) {
++    if (esp_bt_controller_enable(ESP_BT_MODE_CLASSIC_BT) != ESP_OK) {
+         AUDIO_ERROR(TAG, "enable controller failed");
++        audio_free(g_bt_service);
++        g_bt_service = NULL;
+         return ESP_FAIL;
+     }
+ 
+     if (esp_bluedroid_init() != ESP_OK) {
+         AUDIO_ERROR(TAG, "initialize bluedroid failed");
++        audio_free(g_bt_service);
++        g_bt_service = NULL;
+         return ESP_FAIL;
+     }
+ 
+     if (esp_bluedroid_enable() != ESP_OK) {
+         AUDIO_ERROR(TAG, "enable bluedroid failed");
++        audio_free(g_bt_service);
++        g_bt_service = NULL;
+         return ESP_FAIL;
+     }
+ 
+@@ -626,6 +645,30 @@ esp_err_t bluetooth_service_start(bluetooth_service_cfg_t *config)
+     esp_avrc_ct_init();
+     esp_avrc_ct_register_callback(bt_avrc_ct_cb);
+ 
++    /* esp_avrc_tg_init() (2026-08-24 fix, esp32_bt_speaker_48khz): per
++     * esp_avrc_api.h's esp_avrc_tg_init() doc comment - "AVRC cannot work
++     * independently, AVRC should be used along with A2DP and AVRC should be
++     * initialized before A2DP" - and every official esp-idf example that
++     * pairs AVRCP-TG with A2DP (e.g.
++     * examples/bluetooth/bluedroid/classic_bt/avrcp_absolute_volume/main/
++     * main.c) does exactly this: both esp_avrc_ct_init() AND
++     * esp_avrc_tg_init() before esp_a2d_sink_init()/esp_a2d_source_init()
++     * below. This file previously only ever called esp_avrc_ct_init() here
++     * and left esp_avrc_tg_init() to be called later by consumers (e.g.
++     * esp32_bt_speaker_48khz's own start_avrc_bridge(), called AFTER this
++     * function already ran esp_a2d_source_init() + started discovery) -
++     * which violates that ordering and is the reason AVRCP passthrough
++     * commands sent by a paired remote/speaker were not reliably reaching
++     * the app's AVRCP TG callback. Calling it here, unconditionally and
++     * before the A2DP init below (for both SINK and SOURCE modes), fixes the
++     * ordering for any consumer of this shared component - not just the
++     * source-mode caller that surfaced it. Registering the app's own TG
++     * callback and passthrough-command filter is NOT order-sensitive
++     * relative to A2DP (only relative to this call), so those remain the
++     * caller's responsibility - see esp32_bt_speaker_48khz/main/main.c's
++     * start_avrc_bridge(). */
++    ESP_ERROR_CHECK(esp_avrc_tg_init());
++
+     if (config->mode == BLUETOOTH_A2DP_SINK) {
+ #if (ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 0, 0))
+         esp_avrc_rn_evt_cap_mask_t evt_set = {0};
+@@ -684,6 +727,7 @@ esp_err_t bluetooth_service_destroy()
+     }
+     if (g_bt_service) {
+         esp_avrc_ct_deinit();
++        esp_avrc_tg_deinit(); /* symmetric with the esp_avrc_tg_init() added above */
+         if (g_bt_service->stream_type == AUDIO_STREAM_READER) {
+             esp_a2d_sink_deinit();
+         } else {
